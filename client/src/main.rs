@@ -370,7 +370,6 @@ fn help(){
     println!("{}\t-> {}", style("exit/quit").green(), style("quit program").cyan());
 }
 
-
 fn local(){
     //let paths = fs::read_dir("./").unwrap();
     println!("{}", style("Local files (client/shared)").magenta());
@@ -407,7 +406,6 @@ fn format_response(remote_list: &String) -> Vec<RemoteFileList>{
     {
         //first pass, push all names to vector
         //println!("file name: {} {}", i, &cp[1]);
-
         let mut current = RemoteFileList { f_name: String::from(""), f_size: String::from("") };
         current.f_name = String::from(&cp[1]);
         remote_file_list.push(current);
@@ -419,12 +417,16 @@ fn format_response(remote_list: &String) -> Vec<RemoteFileList>{
         //println!("{} {}", remote_file_list[i].f_name, &cap[1]);
         remote_file_list[i].f_size = String::from(&cap[1]);
     }
-
-    /*for cap in file_name.captures_iter(remote_list)
-    {
-        println!("{}", &cap[1]);
-    }*/
     remote_file_list
+}
+
+fn get_file(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<error::Error + Send + Sync>> {
+
+    let file_name = &command[4..];
+    println!("attempting to get file {:?}", file_name);
+
+    let response = String::from("get_file default response");
+    Ok(response)
 }
 
 fn main() {
@@ -444,7 +446,7 @@ fn main() {
 
             if command.starts_with("get "){
                 println!("user is trying to get a file");
-                match check_cmd(&command, &mut stream) {
+                match get_file(&command, &mut stream) {
                     Ok(response) => println!("response: {}", response),
                     Err(err) => println!("An error occurred: {}", err),
                 }
@@ -462,10 +464,8 @@ fn main() {
                         match ls_remote(&command, &mut stream) {
                             Ok(response) => {
                                 let formatted_response = format_response(&response);
-                                //println!("{}\n{}", style("Remote files (server/shared)").magenta(), response);
                                 println!("{}", style("Remote files (server/shared)").magenta());
                                 for entry in formatted_response.iter() {
-                                    //println!("{} {}", style(entry.f_name).green(), style(entry.f_size).cyan());
                                     println!("{}  [{} bytes]", style(&entry.f_name).green(), 
                                                                style(&entry.f_size).cyan());
                                 }
