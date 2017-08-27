@@ -395,34 +395,35 @@ fn local(){
     //}
 }
 
-fn format_response(remote_list: &String) {
+fn format_response(remote_list: &String) -> Vec<RemoteFileList>{
     //create vector of type RemoteFileList
     let mut remote_file_list: Vec<RemoteFileList> = Vec::new();
-    println!("{:?}", remote_list);
+    //println!("{:?}", remote_list);
 
     //regex: /(\d+)(?= bytes\])/g
 
     lazy_static! {
         static ref file_size: Regex = Regex::new(r"(\d+)(?: bytes)").unwrap();
-        static ref file_name: Regex = Regex::new(r"(\.+)(?: \[ bytes)").unwrap();
+        //static ref file_name: Regex = Regex::new(r"(.*)(?:\s\[)(?:.*)(?: bytes\])").unwrap();
+        static ref file_name: Regex = Regex::new(r"(.*)(?:\s\s\[.*\sbytes\])").unwrap();
     }
-    for cap in file_size.captures_iter(remote_list) { 
-        println!("size capture 1: {}", &cap[1]);
-    }
-
-    for cp in file_name.captures_iter(remote_list)
+    for (i, cp) in file_name.captures_iter(remote_list).enumerate()
     {
-        println!("name 0: {}\n", &cp[0]);
-        println!("name 1: {}\n", &cp[1]);
+        //first pass, push all names to vector
+        //println!("file name: {} {}", i, &cp[1]);
+
+        let mut current = RemoteFileList { f_name: String::from(""), f_size: String::from("") };
+        current.f_name = String::from(&cp[1]);
+        remote_file_list.push(current);
     }
 
+    for (i, cap) in file_size.captures_iter(remote_list).enumerate() { 
 
-    //traverse the string response (at every \n we parse it again)
-        //split both strings
-        //push them to vector
-
-    //return vector
-    
+        //second pass: edit all sizes according respective names
+        //println!("{} {}", remote_file_list[i].f_name, &cap[1]);
+        remote_file_list[i].f_size = String::from(&cap[1]);
+    }
+    remote_file_list
 }
 
 fn main() {
@@ -460,7 +461,14 @@ fn main() {
                         match ls_remote(&command, &mut stream) {
                             Ok(response) => {
                                 let formatted_response = format_response(&response);
-                                println!("{}\n{}", style("Remote files (server/shared)").magenta(), response);
+                                //println!("{}\n{}", style("Remote files (server/shared)").magenta(), response);
+                                println!("{}", style("Remote files (server/shared)").magenta());
+                                for entry in formatted_response.iter() {
+                                    //println!("{} {}", style(entry.f_name).green(), style(entry.f_size).cyan());
+                                    println!("{}  [{} bytes]", style(&entry.f_name).green(), 
+                                                               style(&entry.f_size).cyan());
+                                }
+                                
                             },
                             Err(err) => println!("An error occurred: {}", err),
                         }
