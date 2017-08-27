@@ -1,3 +1,6 @@
+#[macro_use] extern crate lazy_static;
+
+extern crate regex;
 extern crate encoding;
 extern crate console;
 extern crate pbr;
@@ -15,11 +18,17 @@ use std::fs;
 use std::time::Duration;
 use std::thread;
 use pbr::ProgressBar;
+use regex::Regex;
 
 use std::fs::{DirEntry};
 use std::path::Path;
 
 use console::{Term, style};
+
+struct RemoteFileList {
+    f_name: String,
+    f_size: String
+}
 
 fn ls_remote(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<error::Error + Send + Sync>> {
         //get string size (in bytes)
@@ -372,24 +381,48 @@ fn local(){
             //clean path from file name:
             let mut fullpath = String::from(entry.path().to_string_lossy());
             let filename = String::from(str::replace(&fullpath, "./src/shared", ""));
-            if filename.starts_with("\\"){
-                let trimmed = &filename[1..];
+            let trimmed = &filename[1..];
 
-                let mut file = File::open(fullpath).unwrap();
-                let file_size = file.metadata().unwrap().len();
+            let mut file = File::open(fullpath).unwrap();
+            let file_size = file.metadata().unwrap().len();
 
-                println!("{}  [{:?} bytes]", style(trimmed).green(), style(file_size).cyan());
-            }
-            else {
-                //let metadata = fs::metadata(filename);
-                println!("file: {:?}", filename);
-            }
+            println!("{}  [{:?} bytes]", style(trimmed).green(), style(file_size).cyan());
         }
     }
 
     //for path in paths{
             //println!("{:?}", path.unwrap().path())
     //}
+}
+
+fn format_response(remote_list: &String) {
+    //create vector of type RemoteFileList
+    let mut remote_file_list: Vec<RemoteFileList> = Vec::new();
+    println!("{:?}", remote_list);
+
+    //regex: /(\d+)(?= bytes\])/g
+
+    lazy_static! {
+        static ref file_size: Regex = Regex::new(r"(\d+)(?: bytes)").unwrap();
+        static ref file_name: Regex = Regex::new(r"(\.+)(?: \[ bytes)").unwrap();
+    }
+    for cap in file_size.captures_iter(remote_list) { 
+        println!("size capture 1: {}", &cap[1]);
+    }
+
+    for cp in file_name.captures_iter(remote_list)
+    {
+        println!("name 0: {}\n", &cp[0]);
+        println!("name 1: {}\n", &cp[1]);
+    }
+
+
+    //traverse the string response (at every \n we parse it again)
+        //split both strings
+        //push them to vector
+
+    //return vector
+    
 }
 
 fn main() {
@@ -426,6 +459,7 @@ fn main() {
                     "ls-remote" => {
                         match ls_remote(&command, &mut stream) {
                             Ok(response) => {
+                                let formatted_response = format_response(&response);
                                 println!("{}\n{}", style("Remote files (server/shared)").magenta(), response);
                             },
                             Err(err) => println!("An error occurred: {}", err),

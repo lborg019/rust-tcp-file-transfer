@@ -108,29 +108,21 @@ fn handle_client(mut stream: TcpStream) -> Result<String> {
                     //clean path from file name:
                     let mut fullpath = String::from(entry.path().to_string_lossy());
                     let filename = String::from(str::replace(&fullpath, "./src/shared", ""));
-                    if filename.starts_with("\\"){
-                        let trimmed = &filename[1..];
+                    let trimmed = &filename[1..];
 
-                        let mut file = File::open(fullpath).unwrap();
-                        let file_size = file.metadata().unwrap().len();
+                    let mut file = File::open(fullpath).unwrap();
+                    let file_size = file.metadata().unwrap().len();
 
-                        println!("{}  [{:?} bytes]", style(trimmed).green(), style(file_size).cyan());
-                        //format data:
-                        let partial = format!("{}  [{:?} bytes]", trimmed, file_size);
-                        //println!("{:?}", partial);
-                        for c in partial.chars()
-                        {
-                            //load the buffer
-                            ls_bytes.push(c as u8);
-                        }
-                        ls_bytes.push('\n' as u8);
-
+                    println!("{}  [{:?} bytes]", style(trimmed).green(), style(file_size).cyan());
+                    //format data:
+                    let partial = format!("{}  [{:?} bytes]", trimmed, file_size);
+                    //println!("{:?}", partial);
+                    for c in partial.chars()
+                    {
+                        //load the buffer
+                        ls_bytes.push(c as u8);
                     }
-                    else {
-                        // in case not running in windows, file path might work differently
-                        //let metadata = fs::metadata(filename);
-                        println!("file: {:?}", filename);
-                    }
+                    ls_bytes.push('\n' as u8);
                 }
             }
             //wrap the buffer
