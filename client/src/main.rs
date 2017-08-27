@@ -398,14 +398,10 @@ fn local(){
 fn format_response(remote_list: &String) -> Vec<RemoteFileList>{
     //create vector of type RemoteFileList
     let mut remote_file_list: Vec<RemoteFileList> = Vec::new();
-    //println!("{:?}", remote_list);
-
-    //regex: /(\d+)(?= bytes\])/g
 
     lazy_static! {
-        static ref file_size: Regex = Regex::new(r"(\d+)(?: bytes)").unwrap();
-        //static ref file_name: Regex = Regex::new(r"(.*)(?:\s\[)(?:.*)(?: bytes\])").unwrap();
-        static ref file_name: Regex = Regex::new(r"(.*)(?:\s\s\[.*\sbytes\])").unwrap();
+        static ref file_size: Regex = Regex::new(r"(\d+)(?:\sbytes\][\n\r])").unwrap();
+        static ref file_name: Regex = Regex::new(r"(.*)(?:\s\s\[.*\sbytes\][\n\r])").unwrap();
     }
     for (i, cp) in file_name.captures_iter(remote_list).enumerate()
     {
@@ -423,6 +419,11 @@ fn format_response(remote_list: &String) -> Vec<RemoteFileList>{
         //println!("{} {}", remote_file_list[i].f_name, &cap[1]);
         remote_file_list[i].f_size = String::from(&cap[1]);
     }
+
+    /*for cap in file_name.captures_iter(remote_list)
+    {
+        println!("{}", &cap[1]);
+    }*/
     remote_file_list
 }
 
