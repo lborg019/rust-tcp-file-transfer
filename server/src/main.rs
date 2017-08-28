@@ -137,7 +137,10 @@ fn handle_client(mut stream: TcpStream) -> Result<String> {
 
             let file_name = &accumulator[4..];
             let mut file_exists = false;
+            let mut file_size = 0;
             
+            //use a constant for ./src/shared
+
             //check if file exists:
             for entry in fs::read_dir("./src/shared").unwrap() {
                 let entry = entry.unwrap();
@@ -147,8 +150,11 @@ fn handle_client(mut stream: TcpStream) -> Result<String> {
                     let mut fullpath = String::from(entry.path().to_string_lossy());
                     let filename = String::from(str::replace(&fullpath, "./src/shared", ""));
                     let trimmed = &filename[1..];
+
                     if trimmed == file_name
                     {
+                        let mut file = File::open(fullpath).unwrap();
+                        file_size = file.metadata().unwrap().len();
                         file_exists = true;
                     }
                 }
@@ -156,17 +162,94 @@ fn handle_client(mut stream: TcpStream) -> Result<String> {
 
             match file_exists{
                 true => {
-                    println!("file found!");
+                    println!("file found");
 
-                    //calculate file size
+                    let mut ack_buf = [0u8; 8];
+                    let message = "file found";
 
-                    //chop it and send
+                    //send file found message
+                    let encoded_size = encode_message_size(message).unwrap();
+                    let encoded_message = encode_message(message).unwrap();
+
+                    //send size
+                    stream.write_all(&encoded_size).unwrap();
+
+                    //receive ack
+                    stream.read(&mut ack_buf).unwrap();
+                    if check_ack(&mut ack_buf) != "ACK" { println!("get_file ACK Failed"); }
+
+                    println!("[get_file]: received ACK from client");
+
+                    //send message
+                    stream.write_all(&encoded_message).unwrap();
+
+                    //receive ack
+                    stream.read(&mut ack_buf).unwrap();
+                    if check_ack(&mut ack_buf) != "ACK" { println!("get_file ACK Failed"); }
+                    println!("[get_file]: received ACK from client [2]");
+
+                    //send file size
+                    let encoded_file_size = encode_message(&file_size.to_string()).unwrap();
+                    stream.write_all(&encoded_file_size).unwrap();
+
+                    //receive ack
+                    stream.read(&mut ack_buf).unwrap();
+                    if check_ack(&mut ack_buf) != "ACK" { println!("get_file ACK Failed"); }
+                    println!("[get_file]: received ACK from client [3]");
+
+                    //send file itself (binary mode)
+                    let mut fullname = String::from("./src/shared/");
+                    fullname.push_str(file_name);
+                    println!("FULLPATH: {:?}", fullname);
+
+                    //open file in binary mode
+                    //let mut remaining_data = file_size.parse::<i32>().unwrap();
+                    let mut remaining_data = file_size as i32;
+
+                    let mut buf = [0u8; 8];
+                    let mut file = File::open(fullname).unwrap();
+
+                    while remaining_data != 0 {
+                        if remaining_data >= 8
+                        {
+                            //read slab from file
+                            let file_slab = file.read(&mut buf);
+                            match file_slab{
+                                Ok(n) => {
+                                    stream.write_all(&buf).unwrap();
+                                    println!("sent {} file bytes (big)", n);
+                                    remaining_data = remaining_data - n as i32;
+                                }
+                                _ => {}
+                            }
+                        }
+                        else {
+                            let file_slab = file.read(&mut buf);
+                            match file_slab {
+                                //client must shrink this last buffer
+                                Ok(n) => {
+                                    stream.write_all(&buf).unwrap();
+                                    println!("sent {} file bytes (small)", n);
+                                    remaining_data = remaining_data - n as i32;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+
+                    //send file itself (binary mode)
+                    //let mut fullname = String::from("./src/shared/");
+                    //fullname.push_str(file_name);
+                    //println!("FULLPATH: {:?}", fullname);
+                    //file.read(&mut buf).unwrap();
+                    //println!("{:?}",buf);
 
                 },
                 false => {
                     println!("file not found");
 
-                    let mut ack_buf = [0u8; 8]; //could be redefined later, check it
+                    let mut ack_buf = [0u8; 8];
                     let message = "file not found";
 
                     //send file not found message
