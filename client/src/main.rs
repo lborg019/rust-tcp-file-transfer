@@ -420,11 +420,137 @@ fn format_response(remote_list: &String) -> Vec<RemoteFileList>{
     remote_file_list
 }
 
+fn encode_message_size(cmd: &str) -> Result<Vec<u8>, Box<error::Error + Send + Sync>>{
+    let mut message_size = cmd.len();
+    //println!("{:?}", cmd);
+    message_size = message_size + 1;
+    let message_size_str = message_size.to_string();
+    let mut message_size_bytes = try!(ASCII.encode(&message_size_str, EncoderTrap::Strict).map_err(|x| x.into_owned()));
+    message_size_bytes.push('\r' as u8);
+
+    //Ok(String::from_utf8(string_size_bytes).unwrap())
+    Ok(message_size_bytes)
+}
+
+fn encode_message(cmd: &str) -> Result <Vec<u8>, Box<error::Error + Send + Sync>> {
+    //println!("{:?}", cmd);
+    let message_str = cmd.to_string();
+    let mut message_bytes = try!(ASCII.encode(&message_str, EncoderTrap::Strict).map_err(|x| x.into_owned()));
+    message_bytes.push('\r' as u8);
+
+    //Ok(String::from_utf8(string_size_bytes).unwrap())
+    Ok(message_bytes)
+}
+
+fn check_ack(mut ack_buf: &mut [u8]) -> String {
+
+    let ack_slice: &str = str::from_utf8(&mut ack_buf).unwrap(); //string slice
+    let mut ack_str = ack_slice.to_string(); //convert slice to string
+    let index: usize = ack_str.rfind('\r').unwrap();
+    //println!("{:?} server ACK:", ack_str.split_off(index));
+    format!("{:?}", ack_str.split_off(index)); 
+    if ack_str != "ACK"{
+        //println!("received ACK from server");
+        // end with error, maybe set a timeout
+        return String::from("error")
+    }
+    String::from("ACK")
+}
+
 fn get_file(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<error::Error + Send + Sync>> {
 
+    let mut ack_buf = [0u8; 8];
     let file_name = &command[4..];
     println!("attempting to get file {:?}", file_name);
 
+    let encoded_size = encode_message_size(command).unwrap();
+    let encoded_message = encode_message(command).unwrap();
+
+    //check if helper methods are working
+    //println!("{:?}", String::from_utf8(encoded_size.unwrap()).unwrap());
+    //println!("{:?}", String::from_utf8(encoded_message.unwrap()).unwrap());
+
+    //send message size
+    stream.write_all(&encoded_size).unwrap();
+
+    //receive ack
+    stream.read(&mut ack_buf).unwrap();
+    if check_ack(&mut ack_buf) != "ACK" { println!("get_file ACK Failed"); }
+
+    //send message (get filename)
+    stream.write_all(&encoded_message).unwrap();
+
+    //server will check if file exists and reply | clean buffer?
+
+    //read message size
+    stream.read(&mut ack_buf).unwrap();
+
+
+    //to make the code more elegant, convert the next two sections of code into two functions:
+    //decode_message_size
+    //decode_message
+
+    //interpret buffer content into string slice
+    let msg_len_slice: &str = str::from_utf8(&mut ack_buf).unwrap(); // string slice
+    let mut msg_len_str = msg_len_slice.to_string(); //convert slice to string
+
+    let mut numeric_chars = 0;
+    for c in msg_len_str.chars() {
+        if c.is_numeric() == true {
+            numeric_chars = numeric_chars + 1;
+        }
+    }
+
+    //shrink:
+    msg_len_str.truncate(numeric_chars);
+    println!("[get_file]: receiving {} bytes", msg_len_str);
+
+    let ack = encode_message("ACK").unwrap();
+
+    //send ACK
+    stream.write_all(&ack).unwrap();
+
+    //read message itself
+    let mut r = [0u8; 8]; //8 byte buffer
+    let mut accumulator: String = String::new();
+    let mut remaining_data = msg_len_str.parse::<i32>().unwrap();
+
+    while remaining_data != 0 {
+        if remaining_data >= 8
+        {
+            let slab = stream.read(&mut r);
+            match slab {
+                Ok(n) => {
+                    let r_slice = str::from_utf8(&mut r).unwrap();
+                    accumulator.push_str(r_slice);
+                    println!("wrote {} bytes", n);
+                    remaining_data = remaining_data - n as i32;
+                }
+                _ => {}
+            }
+        }
+        else{
+            let slab = stream.read(&mut r);
+            match slab {
+                Ok(n) => {
+                    let s_slice = str::from_utf8(&mut r).unwrap();
+                    let mut s_str = s_slice.to_string();
+                    s_str.truncate(n);
+                    accumulator.push_str(&s_str);
+                    println!("wrote {} bytes", n);
+                    remaining_data = remaining_data - n as i32;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    //format and output response:
+    let index = accumulator.rfind('\r').unwrap();
+    format!("{:?}", accumulator.split_off(index));
+    println!("{:?}", accumulator);
+
+    //default response for now
     let response = String::from("get_file default response");
     Ok(response)
 }

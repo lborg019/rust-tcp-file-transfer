@@ -26,6 +26,43 @@ How my protocol works:
 - Server catches message size and loops in order to assemble message
 */
 
+fn encode_message_size(cmd: &str) -> Result<Vec<u8>> {
+    let mut message_size = cmd.len();
+    //println!("{:?}", cmd);
+    message_size = message_size + 1;
+    let message_size_str = message_size.to_string();
+    let mut message_size_bytes = ASCII.encode(&message_size_str, EncoderTrap::Strict).map_err(|x| x.into_owned()).unwrap();
+    message_size_bytes.push('\r' as u8);
+
+    //Ok(String::from_utf8(string_size_bytes).unwrap())
+    Ok(message_size_bytes)
+}
+
+fn encode_message(cmd: &str) -> Result <Vec<u8>> {
+    //println!("{:?}", cmd);
+    let message_str = cmd.to_string();
+    let mut message_bytes = ASCII.encode(&message_str, EncoderTrap::Strict).map_err(|x| x.into_owned()).unwrap();
+    message_bytes.push('\r' as u8);
+
+    //Ok(String::from_utf8(string_size_bytes).unwrap())
+    Ok(message_bytes)
+}
+
+fn check_ack(mut ack_buf: &mut [u8]) -> String {
+
+    let ack_slice: &str = str::from_utf8(&mut ack_buf).unwrap(); //string slice
+    let mut ack_str = ack_slice.to_string(); //convert slice to string
+    let index: usize = ack_str.rfind('\r').unwrap();
+    //println!("{:?} server ACK:", ack_str.split_off(index));
+    format!("{:?}", ack_str.split_off(index)); 
+    if ack_str != "ACK"{
+        //println!("received ACK from server");
+        // end with error, maybe set a timeout
+        return String::from("error")
+    }
+    String::from("ACK")
+}
+
 fn handle_client(mut stream: TcpStream) -> Result<String> {
     loop {
         //buffer (8 bytes)
@@ -95,12 +132,13 @@ fn handle_client(mut stream: TcpStream) -> Result<String> {
         format!("{:?}", accumulator.split_off(index));
         println!("{:?}", accumulator);
 
-        if accumulator == "ls-remote"
-        {
-            let mut ls_bytes = ASCII.encode("", EncoderTrap::Strict).map_err(|x| x.into_owned()).unwrap();
+        if accumulator.starts_with("get "){
+            println!("preparing to send file");
 
-            //send files to client
-            println!("{}", style("Local files (/shared)").magenta());
+            let file_name = &accumulator[4..];
+            let mut file_exists = false;
+            
+            //check if file exists:
             for entry in fs::read_dir("./src/shared").unwrap() {
                 let entry = entry.unwrap();
                 let path = entry.path();
@@ -109,56 +147,117 @@ fn handle_client(mut stream: TcpStream) -> Result<String> {
                     let mut fullpath = String::from(entry.path().to_string_lossy());
                     let filename = String::from(str::replace(&fullpath, "./src/shared", ""));
                     let trimmed = &filename[1..];
-
-                    let mut file = File::open(fullpath).unwrap();
-                    let file_size = file.metadata().unwrap().len();
-
-                    println!("{}  [{:?} bytes]", style(trimmed).green(), style(file_size).cyan());
-                    //format data:
-                    let partial = format!("{}  [{:?} bytes]", trimmed, file_size);
-                    //println!("{:?}", partial);
-                    for c in partial.chars()
+                    if trimmed == file_name
                     {
-                        //load the buffer
-                        ls_bytes.push(c as u8);
+                        file_exists = true;
                     }
-                    ls_bytes.push('\n' as u8);
                 }
             }
-            //wrap the buffer
-            let l = ls_bytes.len();
-            ls_bytes[l - 1 ] = '\r' as u8;
-            //ls_bytes.push('\r' as u8);
 
-            //check if everything is working okay
-            //we use these braces to limit the scope of the mutable borrow occuring on line 142:
-            {
-                let mut slice: &str = str::from_utf8(&mut ls_bytes).unwrap();
-                let mut slice_str = slice.to_string(); //convert slice to string
-                println!("{}", slice_str);
+            match file_exists{
+                true => {
+                    println!("file found!");
 
-                //calculate buffer size:
-                let length = slice_str.len();
-                //convert it to bytes
-                let ls_bytes_size = ASCII.encode(&length.to_string(), EncoderTrap::Strict).map_err(|x| x.into_owned()).unwrap();
-                //send buffer size:
-                stream.write_all(&ls_bytes_size).unwrap();
+                    //calculate file size
+
+                    //chop it and send
+
+                },
+                false => {
+                    println!("file not found");
+
+                    let mut ack_buf = [0u8; 8]; //could be redefined later, check it
+                    let message = "file not found";
+
+                    //send file not found message
+                    let encoded_size = encode_message_size(message).unwrap();
+                    let encoded_message = encode_message(message).unwrap();
+
+                    //send size
+                    stream.write_all(&encoded_size).unwrap();
+
+                    //receive ack
+                    stream.read(&mut ack_buf).unwrap();
+                    if check_ack(&mut ack_buf) != "ACK" { println!("get_file ACK Failed"); }
+
+                    println!("[get_file]: received ACK from client");
+
+                    //send message
+                    stream.write_all(&encoded_message).unwrap();
+
+                }
             }
+        }
+        else if accumulator.starts_with("put "){
+            println!("preparing to receive file")
+        }
+        else {
+            match accumulator.as_ref() {
+                "ls-remote" =>
+                {
+                    let mut ls_bytes = ASCII.encode("", EncoderTrap::Strict).map_err(|x| x.into_owned()).unwrap();
 
-            //receive ack
-            let mut ack_buf = [0u8; 8];
-            stream.read(&mut ack_buf).unwrap();
-            let ack_slice: &str = str::from_utf8(&mut ack_buf).unwrap(); // string slice
-            let mut ack_str = ack_slice.to_string(); //convert slice to string
-            let index: usize = ack_str.rfind('\r').unwrap();
-            format!("{:?}", ack_str.split_off(index));
-            if ack_str == "ACK" {
-                println!("received ACK from client");
+                    //send file list to client
+                    //println!("{}", style("Local files (/shared)").magenta());
+                    for entry in fs::read_dir("./src/shared").unwrap() {
+                        let entry = entry.unwrap();
+                        let path = entry.path();
+                        if !path.is_dir() {
+                            //clean path from file name:
+                            let mut fullpath = String::from(entry.path().to_string_lossy());
+                            let filename = String::from(str::replace(&fullpath, "./src/shared", ""));
+                            let trimmed = &filename[1..];
+
+                            let mut file = File::open(fullpath).unwrap();
+                            let file_size = file.metadata().unwrap().len();
+
+                            //println!("{}  [{:?} bytes]", style(trimmed).green(), style(file_size).cyan());
+                            //format data:
+                            let partial = format!("{}  [{:?} bytes]", trimmed, file_size);
+                            //println!("{:?}", partial);
+                            for c in partial.chars()
+                            {
+                                //load the buffer
+                                ls_bytes.push(c as u8);
+                            }
+                            ls_bytes.push('\n' as u8);
+                        }
+                    }
+                    //wrap the buffer
+                    let l = ls_bytes.len();
+                    ls_bytes[l - 1 ] = '\r' as u8;
+                    //ls_bytes.push('\r' as u8);
+
+                    //we use these braces to limit the scope of the mutable borrow
+                    {
+                        let mut slice: &str = str::from_utf8(&mut ls_bytes).unwrap();
+                        let mut slice_str = slice.to_string(); //convert slice to string
+                        //println!("{}", slice_str);
+
+                        //calculate buffer size:
+                        let length = slice_str.len();
+                        //convert it to bytes
+                        let ls_bytes_size = ASCII.encode(&length.to_string(), EncoderTrap::Strict).map_err(|x| x.into_owned()).unwrap();
+                        //send buffer size:
+                        stream.write_all(&ls_bytes_size).unwrap();
+                    }
+
+                    //receive ack
+                    let mut ack_buf = [0u8; 8];
+                    stream.read(&mut ack_buf).unwrap();
+                    let ack_slice: &str = str::from_utf8(&mut ack_buf).unwrap(); // string slice
+                    let mut ack_str = ack_slice.to_string(); //convert slice to string
+                    let index: usize = ack_str.rfind('\r').unwrap();
+                    format!("{:?}", ack_str.split_off(index));
+                    if ack_str == "ACK" {
+                        println!("received ACK from client");
+                    }
+
+                    //send buffer itself
+                    stream.write_all(&ls_bytes).unwrap();
+                }
+                _ => println!("received invalid command")
             }
-
-            //send buffer itself
-            stream.write_all(&ls_bytes).unwrap();
-
         }
     }
 }
