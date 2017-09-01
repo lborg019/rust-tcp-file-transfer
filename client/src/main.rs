@@ -20,10 +20,12 @@ use std::thread;
 use pbr::ProgressBar;
 use regex::Regex;
 
-use std::fs::{DirEntry};
-use std::path::Path;
+//use std::fs::{DirEntry};
+//use std::path::Path;
 
 use console::{Term, style};
+
+const BUFFERSIZE: usize = 8;
 
 struct RemoteFileList {
     f_name: String,
@@ -33,8 +35,8 @@ struct RemoteFileList {
 fn receive_file(file_name: String, mut stream: &mut TcpStream) -> String {
 
     println!("file_name: {:?}", file_name);
-    let mut accumulator: String = String::new();
-    let mut r = [0u8; 8]; //8 byte buffer
+    //let mut accumulator: String = String::new();
+    let mut r = [0u8; BUFFERSIZE]; //8 byte buffer
     
     //send ack
     let ack = encode_message("ACK").unwrap();
@@ -57,13 +59,13 @@ fn receive_file(file_name: String, mut stream: &mut TcpStream) -> String {
     //receive file itself (write to file)
     let mut remaining_data = msg_len_str.parse::<i32>().unwrap();
     while remaining_data != 0 {
-        if remaining_data >= 8
+        if remaining_data >= BUFFERSIZE as i32
         {
             let slab = stream.read(&mut r);
             match slab {
                 Ok(n) => {
-                    file_buffer.write(&mut r);
-                    file_buffer.flush();
+                    file_buffer.write(&mut r).unwrap();
+                    file_buffer.flush().unwrap();
                     println!("wrote {} bytes to file", n);
                     remaining_data = remaining_data - n as i32;
                 }
@@ -73,15 +75,15 @@ fn receive_file(file_name: String, mut stream: &mut TcpStream) -> String {
             let array_limit = (remaining_data as i32) - 1;
             let slab = stream.read(&mut r);
             match slab {
-                Ok(n) => {
+                Ok(_) => {
                     let mut r_slice = &r[0..(array_limit as usize + 1)]; //fixes underreading
                     //caused by not using
                     //subprocess call on 
                     //the server
-                    file_buffer.write(&mut r_slice);
-                    file_buffer.flush();
+                    file_buffer.write(&mut r_slice).unwrap();
+                    file_buffer.flush().unwrap();
                     println!("wrote {} bytes to file (small)", remaining_data as i32);
-                    remaining_data = remaining_data - n as i32;
+                    remaining_data = 0;
                 }
                 _ => {}
             }
@@ -126,14 +128,14 @@ fn decode_message_size(mut ack_buf: &mut [u8]) -> String {
     msg_len_str
 }
 
-fn decode_message(msg_len_str: String, mut ack_buf: &mut [u8], mut stream: &mut TcpStream) -> String{
+fn decode_message(msg_len_str: String, mut stream: &mut TcpStream) -> String{
     //read message itself
-    let mut r = [0u8; 8]; //8 byte buffer
+    let mut r = [0u8; BUFFERSIZE]; //8 byte buffer
     let mut accumulator: String = String::new();
     let mut remaining_data = msg_len_str.parse::<i32>().unwrap();
 
     while remaining_data != 0 {
-        if remaining_data >= 8
+        if remaining_data >= BUFFERSIZE as i32
         {
             let slab = stream.read(&mut r);
             match slab {
@@ -193,7 +195,7 @@ fn check_cmd(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<er
     stream.write_all(&string_size_bytes).unwrap();
 
     //receive message size ACK:
-    let mut ack_buf = [0u8; 8];
+    let mut ack_buf = [0u8; BUFFERSIZE];
     stream.read(&mut ack_buf).unwrap();
     let ack_slice: &str = str::from_utf8(&mut ack_buf).unwrap(); //string slice
     let mut ack_str = ack_slice.to_string(); //convert slice to string
@@ -208,7 +210,7 @@ fn check_cmd(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<er
     stream.write_all(&command_bytes).unwrap();
 
     //receive message length:
-    let mut buf = [0u8; 8]; //make it bigger if necessary
+    let mut buf = [0u8; BUFFERSIZE]; //make it bigger if necessary
     stream.read(&mut buf).unwrap();
 
     //interpret the buffer contents into a string slice
@@ -241,107 +243,6 @@ fn check_cmd(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<er
 
     println!("receiving {} bytes", msg_len_str);
 
-    /*
-    let mut remaining_data = msg_len_str.parse::<i32>().unwrap();
-    let mut accumulator: String = String::new();
-    let mut r = [0u8; 8]; //8 byte buffer
-
-    if remaining_data > 260
-    //big message; write to file
-    {
-
-        //format file name
-        // ../files/file1.py
-        let start = command.rfind('/').unwrap() as usize;
-        let end = command.rfind('.').unwrap() as usize;
-        let mut file_name = String::from(&command[start + 1..end]);
-        file_name.push_str(".json");
-        println!("{}", &command);
-        println!("{}", file_name);
-
-        //create a file
-        let mut file_buffer = BufWriter::new(File::create(file_name)?);
-
-        while remaining_data != 0 {
-            if remaining_data >= 8
-            //slab >= 8 byte buffer
-            {
-                let slab = stream.read(&mut r);
-                match slab {
-                    Ok(n) => {
-                        file_buffer.write(&mut r)?;
-                        file_buffer.flush()?;
-                        println!("wrote {} bytes to file", n);
-                        remaining_data = remaining_data - n as i32;
-                    }
-                    _ => {}
-                }
-            } else
-            //slab < 8 byte buffer
-            {
-                let array_limit = (remaining_data as i32) - 1;
-                let slab = stream.read(&mut r);
-                match slab {
-                    Ok(n) => {
-                        let mut r_slice = &r[0..(array_limit as usize + 1)]; // fixes underreading
-                        // caused by not using
-                        // subprocess call  on
-                        // the server server
-                        file_buffer.write(&mut r_slice)?;
-                        file_buffer.flush()?;
-                        println!("wrote {} bytes to file", n);
-                        remaining_data = remaining_data - n as i32;
-                    }
-                    _ => {}
-                }
-            }
-        }
-        accumulator.push_str("response written to file");
-    } else {
-        //small message; receive as string
-        while remaining_data != 0 {
-            if remaining_data >= 8
-            //slab >= 8 byte buffer
-            {
-                let slab = stream.read(&mut r);
-                match slab {
-                    Ok(n) => {
-                        let r_slice = str::from_utf8(&mut r).unwrap(); //string slice
-                        accumulator.push_str(r_slice);
-                        println!("wrote {} bytes", n);
-                        remaining_data = remaining_data - n as i32;
-                    }
-                    _ => {}
-                }
-            }
-            /*
-            option 1) receive and read a smaller buffer
-            option 2) receive and read same buffer; truncate it to the smaller slab size
-
-            since we cannot instantiate an array with a non-constant:
-                e.g.: let mut r = [0u8; remainingData];
-            it is better to just put the byte in the 8 byte buffer, and shrink it with
-            .truncate() method before pushing to the String
-            */
-            else
-            //slab < 8 byte buffer
-            {
-                let slab = stream.read(&mut r);
-                match slab {
-                    Ok(n) => {
-                        let s_slice = str::from_utf8(&mut r).unwrap(); //string slice
-                        let mut s_str = s_slice.to_string(); //convert slice to string
-                        s_str.truncate(n);
-                        accumulator.push_str(&s_str);
-                        println!("wrote {} bytes", n);
-                        remaining_data = remaining_data - n as i32;
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }*/
-
     let response = ack_str;
     Ok(response)
 }
@@ -373,19 +274,19 @@ fn format_response(remote_list: &String) -> Vec<RemoteFileList>{
     let mut remote_file_list: Vec<RemoteFileList> = Vec::new();
 
     lazy_static! {
-        static ref file_size: Regex = Regex::new(r"(\d+)(?:\sbytes\][\n\r])").unwrap();
-        static ref file_name: Regex = Regex::new(r"(.*)(?:\s\s\[.*\sbytes\][\n\r])").unwrap();
+        static ref FILE_SIZE: Regex = Regex::new(r"(\d+)(?:\sbytes\][\n\r])").unwrap();
+        static ref FILE_NAME: Regex = Regex::new(r"(.*)(?:\s\s\[.*\sbytes\][\n\r])").unwrap();
     }
-    for (i, cp) in file_name.captures_iter(remote_list).enumerate()
+    for cp in FILE_NAME.captures_iter(remote_list).enumerate()
     {
         //first pass, push all names to vector
         //println!("file name: {} {}", i, &cp[1]);
         let mut current = RemoteFileList { f_name: String::from(""), f_size: String::from("") };
-        current.f_name = String::from(&cp[1]);
+        current.f_name = String::from(&cp.1[1]);
         remote_file_list.push(current);
     }
 
-    for (i, cap) in file_size.captures_iter(remote_list).enumerate() { 
+    for (i, cap) in FILE_SIZE.captures_iter(remote_list).enumerate() { 
 
         //second pass: edit all sizes according respective names
         //println!("{} {}", remote_file_list[i].f_name, &cap[1]);
@@ -427,11 +328,11 @@ fn ls_local(){
         let path = entry.path();
         if !path.is_dir() {
             //clean path from file name:
-            let mut fullpath = String::from(entry.path().to_string_lossy());
+            let fullpath = String::from(entry.path().to_string_lossy());
             let filename = String::from(str::replace(&fullpath, "./src/shared", ""));
             let trimmed = &filename[1..];
 
-            let mut file = File::open(fullpath).unwrap();
+            let file = File::open(fullpath).unwrap();
             let file_size = file.metadata().unwrap().len();
 
             println!("{}  [{:?} bytes]", style(trimmed).green(), style(file_size).cyan());
@@ -468,7 +369,7 @@ fn ls_remote(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<er
     stream.write_all(&string_size_bytes).unwrap();
 
     //receive message size ACK:
-    let mut ack_buf = [0u8; 8];
+    let mut ack_buf = [0u8; BUFFERSIZE];
     stream.read(&mut ack_buf).unwrap();
     let ack_slice: &str = str::from_utf8(&mut ack_buf).unwrap(); //string slice
     let mut ack_str = ack_slice.to_string(); //convert slice to string
@@ -484,7 +385,7 @@ fn ls_remote(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<er
     stream.write_all(&command_bytes).unwrap();
 
     //receive message length:
-    let mut buf = [0u8; 8]; //make it bigger if necessary
+    let mut buf = [0u8; BUFFERSIZE]; //make it bigger if necessary
     stream.read(&mut buf).unwrap();
 
     //interpret the buffer contents into a string slice
@@ -524,11 +425,11 @@ fn ls_remote(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<er
     //receive the file list:
     let mut remaining_data = msg_len_str.parse::<i32>().unwrap();
     let mut accumulator: String = String::new();
-    let mut r = [0u8; 8]; //8 byte buffer
+    let mut r = [0u8; BUFFERSIZE]; //8 byte buffer
 
     //small message; receive as string
     while remaining_data != 0 {
-        if remaining_data >= 8
+        if remaining_data >= BUFFERSIZE as i32
         //slab >= 8 byte buffer
         {
             let slab = stream.read(&mut r);
@@ -604,7 +505,7 @@ fn get_file(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<err
     stream.write_all(&ack).unwrap();
 
     //read message ("file found" or "file not found")
-    let msg_str = decode_message(msg_len_str, &mut ack_buf, &mut stream);
+    let msg_str = decode_message(msg_len_str, &mut stream);
     //println!("[get_file]: message {:?}", msg_str);
 
     match msg_str.as_ref(){
@@ -627,11 +528,10 @@ fn get_file(command: &str, mut stream: &mut TcpStream) -> Result<String, Box<err
     Ok(response)
 }
 
-fn put_file(){}
+//fn put_file(){}
 
 fn main() {
     //setup connection:
-    //let mut stream = TcpStream::connect("127.0.0.1:5555")
     let mut stream = TcpStream::connect("127.0.0.1:5555") // try!(TcpStream::connect(HOST));
                                 .expect("Couldn't connect to the server...");
 
